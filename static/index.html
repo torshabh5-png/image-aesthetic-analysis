@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AesthetIQ — Image Aesthetic Analyzer</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0a0a0f;
+    --surface:   #111118;
+    --surface2:  #1a1a26;
+    --border:    rgba(255,255,255,0.07);
+    --accent:    #c8a96e;
+    --accent2:   #7c6ef0;
+    --text:      #e8e8f0;
+    --muted:     #6b6b80;
+    --low:       #e05c5c;
+    --med:       #e0b84a;
+    --high:      #5ce08a;
+    --radius:    16px;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Noise grain overlay ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none; z-index: 1000; opacity: 0.5;
+  }
+
+  /* ── Ambient blobs ── */
+  .blob {
+    position: fixed; border-radius: 50%;
+    filter: blur(120px); opacity: 0.12; pointer-events: none; z-index: 0;
+  }
+  .blob-1 { width: 600px; height: 600px; background: var(--accent2); top: -200px; right: -100px; animation: drift1 18s ease-in-out infinite alternate; }
+  .blob-2 { width: 400px; height: 400px; background: var(--accent);  bottom: -100px; left: -100px; animation: drift2 22s ease-in-out infinite alternate; }
+
+  @keyframes drift1 { from { transform: translate(0,0) scale(1); } to { transform: translate(-60px, 80px) scale(1.15); } }
+  @keyframes drift2 { from { transform: translate(0,0) scale(1); } to { transform: translate(80px,-60px) scale(1.1); } }
+
+  /* ── Layout ── */
+  .wrapper { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 0 24px 80px; }
+
+  /* ── Header ── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 36px 0 48px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 56px;
+  }
+
+  .logo {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.9rem; font-weight: 700;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, var(--accent) 0%, #e8d5a8 50%, var(--accent) 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-size: 200% 200%;
+    animation: shimmer 4s linear infinite;
+  }
+  @keyframes shimmer { 0%{background-position:0% 50%} 100%{background-position:200% 50%} }
+
+  .logo span { font-style: italic; font-weight: 400; }
+
+  .tagline {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--muted);
+  }
+
+  /* ── Upload zone ── */
+  .upload-zone {
+    border: 1.5px dashed var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: 60px 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.3s, background 0.3s, transform 0.2s;
+    position: relative; overflow: hidden;
+    margin-bottom: 32px;
+  }
+  .upload-zone::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 50% 0%, rgba(124,110,240,0.08) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: var(--accent2);
+    background: var(--surface2);
+    transform: translateY(-2px);
+  }
+  .upload-zone.has-image { padding: 0; border-style: solid; border-color: var(--accent2); }
+
+  .upload-icon {
+    width: 56px; height: 56px; margin: 0 auto 20px;
+    border: 1.5px solid var(--border); border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface2); font-size: 1.4rem;
+    transition: transform 0.3s, border-color 0.3s;
+  }
+  .upload-zone:hover .upload-icon { transform: scale(1.08) rotate(-4deg); border-color: var(--accent2); }
+
+  .upload-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.4rem; margin-bottom: 8px;
+  }
+  .upload-sub { font-size: 0.82rem; color: var(--muted); line-height: 1.6; }
+  .upload-sub strong { color: var(--accent); }
+
+  #file-input { display: none; }
+
+  /* Preview image */
+  #preview-img {
+    width: 100%; max-height: 480px; object-fit: contain;
+    display: none; border-radius: calc(var(--radius) - 2px);
+  }
+
+  /* ── Analyze button ── */
+  .btn-analyze {
+    width: 100%; padding: 18px;
+    background: linear-gradient(135deg, var(--accent2) 0%, #9b8cf5 100%);
+    color: #fff; border: none; border-radius: var(--radius);
+    font-family: 'DM Mono', monospace; font-size: 0.85rem;
+    letter-spacing: 0.15em; text-transform: uppercase;
+    cursor: pointer; position: relative; overflow: hidden;
+    transition: opacity 0.2s, transform 0.2s, box-shadow 0.3s;
+    box-shadow: 0 8px 40px rgba(124,110,240,0.3);
+  }
+  .btn-analyze:hover { transform: translateY(-2px); box-shadow: 0 12px 50px rgba(124,110,240,0.45); }
+  .btn-analyze:active { transform: translateY(0); }
+  .btn-analyze:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-analyze::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+    transform: translateX(-100%);
+  }
+  .btn-analyze:not(:disabled):hover::after { animation: sweep 0.6s ease; }
+  @keyframes sweep { to { transform: translateX(100%); } }
+
+  /* ── Spinner ── */
+  .spinner {
+    display: inline-block; width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff; border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: middle; margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Results card ── */
+  #results {
+    display: none; margin-top: 40px;
+    animation: fadeUp 0.5s ease forwards;
+  }
+  @keyframes fadeUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+
+  .results-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;
+  }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 28px;
+    position: relative; overflow: hidden;
+  }
+  .card::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(ellipse at top left, rgba(200,169,110,0.04), transparent 60%);
+    pointer-events: none;
+  }
+
+  .card-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  /* Score card */
+  .score-value {
+    font-family: 'Playfair Display', serif;
+    font-size: 4.5rem; font-weight: 700; line-height: 1;
+    background: linear-gradient(135deg, var(--accent), #e8d5a8);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 4px;
+  }
+  .score-denom { font-size: 1.2rem; color: var(--muted); font-family: 'DM Mono', monospace; }
+
+  /* Label badge */
+  .label-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 16px; border-radius: 100px;
+    font-family: 'DM Mono', monospace; font-size: 0.75rem;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    margin-top: 12px;
+  }
+  .label-badge.Low    { background: rgba(224,92,92,0.15);  color: var(--low);  border: 1px solid rgba(224,92,92,0.3); }
+  .label-badge.Medium { background: rgba(224,184,74,0.15); color: var(--med);  border: 1px solid rgba(224,184,74,0.3); }
+  .label-badge.High   { background: rgba(92,224,138,0.15); color: var(--high); border: 1px solid rgba(92,224,138,0.3); }
+
+  .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  /* Confidence card */
+  .confidence-value {
+    font-family: 'Playfair Display', serif;
+    font-size: 3.2rem; font-weight: 700; line-height: 1.1;
+    color: var(--text); margin-bottom: 16px;
+  }
+  .conf-bar {
+    height: 6px; background: var(--surface2);
+    border-radius: 3px; overflow: hidden; margin-top: 8px;
+  }
+  .conf-fill {
+    height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent2), var(--accent));
+    width: 0; transition: width 1.2s cubic-bezier(0.16,1,0.3,1);
+  }
+
+  /* Breakdown card – full width */
+  .card.full { grid-column: 1 / -1; }
+
+  .breakdown-grid {
+    display: grid; grid-template-columns: repeat(5,1fr); gap: 16px; margin-top: 16px;
+  }
+
+  .dim-item { text-align: center; }
+  .dim-label {
+    font-family: 'DM Mono', monospace; font-size: 0.62rem;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 10px;
+  }
+
+  /* Radial progress */
+  .radial { position: relative; width: 64px; height: 64px; margin: 0 auto 8px; }
+  .radial svg { transform: rotate(-90deg); }
+  .radial-track { fill: none; stroke: var(--surface2); stroke-width: 5; }
+  .radial-fill  { fill: none; stroke-width: 5; stroke-linecap: round;
+                  stroke-dasharray: 163; stroke-dashoffset: 163;
+                  transition: stroke-dashoffset 1.4s cubic-bezier(0.16,1,0.3,1); }
+  .radial-text  {
+    position: absolute; inset: 0; display: flex;
+    align-items: center; justify-content: center;
+    font-family: 'DM Mono', monospace; font-size: 0.7rem; font-weight: 500;
+  }
+
+  /* Feedback card */
+  .feedback-text {
+    font-size: 0.95rem; line-height: 1.8; color: var(--text);
+    border-left: 2px solid var(--accent); padding-left: 20px;
+    font-style: italic;
+  }
+
+  /* ── Score arc ── */
+  .arc-container { margin: 28px 0 4px; }
+  .arc-svg { width: 100%; max-width: 320px; display: block; margin: 0 auto; overflow: visible; }
+
+  /* ── Error toast ── */
+  #error-toast {
+    display: none; position: fixed; bottom: 32px; left: 50%;
+    transform: translateX(-50%);
+    background: #2a1515; border: 1px solid var(--low); color: var(--low);
+    padding: 14px 28px; border-radius: 100px;
+    font-family: 'DM Mono', monospace; font-size: 0.8rem;
+    z-index: 9999; animation: fadeUp 0.3s ease;
+  }
+
+  /* ── Reset btn ── */
+  .btn-reset {
+    width: 100%; margin-top: 12px; padding: 14px;
+    background: transparent; border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--muted);
+    font-family: 'DM Mono', monospace; font-size: 0.75rem;
+    letter-spacing: 0.15em; text-transform: uppercase;
+    cursor: pointer; transition: border-color 0.2s, color 0.2s;
+  }
+  .btn-reset:hover { border-color: var(--accent); color: var(--accent); }
+
+  @media (max-width: 600px) {
+    .results-grid { grid-template-columns: 1fr; }
+    .breakdown-grid { grid-template-columns: repeat(3,1fr); }
+    .score-value { font-size: 3.2rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="blob blob-1"></div>
+<div class="blob blob-2"></div>
+
+<div class="wrapper">
+
+  <!-- Header -->
+  <header>
+    <div>
+      <div class="logo">Aesthet<span>IQ</span></div>
+    </div>
+    <div class="tagline">Image Aesthetic Analyzer · MobileNet</div>
+  </header>
+
+  <!-- Upload Zone -->
+  <div class="upload-zone" id="upload-zone">
+    <img id="preview-img" alt="Preview"/>
+    <div id="upload-prompt">
+      <div class="upload-icon">🖼</div>
+      <div class="upload-title">Drop your image here</div>
+      <div class="upload-sub">
+        or <strong>click to browse</strong> — JPEG, PNG, WEBP<br/>
+        Our MobileNet model will rate its aesthetic quality
+      </div>
+    </div>
+    <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp"/>
+  </div>
+
+  <!-- Analyze button -->
+  <button class="btn-analyze" id="analyze-btn" disabled>
+    Analyze Aesthetics
+  </button>
+
+  <!-- Results -->
+  <div id="results">
+
+    <div class="results-grid">
+
+      <!-- Score card -->
+      <div class="card">
+        <div class="card-label">Aesthetic Score</div>
+        <div class="score-value" id="score-val">—</div>
+        <span class="score-denom">/ 10</span>
+
+        <!-- Arc gauge -->
+        <div class="arc-container">
+          <svg class="arc-svg" viewBox="0 0 200 110">
+            <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#1a1a26" stroke-width="12" stroke-linecap="round"/>
+            <path id="arc-fill" d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="url(#arcGrad)" stroke-width="12" stroke-linecap="round"
+                  stroke-dasharray="251.2" stroke-dashoffset="251.2"/>
+            <defs>
+              <linearGradient id="arcGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%"   stop-color="#e05c5c"/>
+                <stop offset="50%"  stop-color="#e0b84a"/>
+                <stop offset="100%" stop-color="#5ce08a"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+
+        <div id="label-badge" class="label-badge">
+          <span class="badge-dot"></span>
+          <span id="label-text">—</span>
+        </div>
+      </div>
+
+      <!-- Confidence card -->
+      <div class="card">
+        <div class="card-label">Model Confidence</div>
+        <div class="confidence-value" id="conf-val">—%</div>
+        <div class="conf-bar"><div class="conf-fill" id="conf-fill"></div></div>
+        <div style="margin-top:16px; font-size:0.78rem; color:var(--muted); line-height:1.6;">
+          Based on how decisively the model scored this image relative to the dataset midpoint.
+        </div>
+      </div>
+
+      <!-- Breakdown card -->
+      <div class="card full">
+        <div class="card-label">Aesthetic Dimensions</div>
+        <div class="breakdown-grid" id="breakdown-grid">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- Feedback card -->
+      <div class="card full">
+        <div class="card-label">Analysis</div>
+        <div class="feedback-text" id="feedback-text">—</div>
+      </div>
+
+    </div>
+
+    <button class="btn-reset" id="reset-btn">↩ Analyze Another Image</button>
+  </div>
+
+</div>
+
+<!-- Error toast -->
+<div id="error-toast"></div>
+
+<script>
+const uploadZone  = document.getElementById('upload-zone');
+const fileInput   = document.getElementById('file-input');
+const previewImg  = document.getElementById('preview-img');
+const uploadPrompt= document.getElementById('upload-prompt');
+const analyzeBtn  = document.getElementById('analyze-btn');
+const results     = document.getElementById('results');
+const resetBtn    = document.getElementById('reset-btn');
+
+let selectedFile = null;
+
+// ── Drag & drop ──────────────────────────────────────────────────────────────
+uploadZone.addEventListener('click', () => { if (!selectedFile) fileInput.click(); });
+uploadZone.addEventListener('dragover',  e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+uploadZone.addEventListener('dragleave', ()=> { uploadZone.classList.remove('dragover'); });
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault(); uploadZone.classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+function handleFile(file) {
+  selectedFile = file;
+  const url = URL.createObjectURL(file);
+  previewImg.src = url;
+  previewImg.style.display = 'block';
+  uploadPrompt.style.display = 'none';
+  uploadZone.classList.add('has-image');
+  analyzeBtn.disabled = false;
+  results.style.display = 'none';
+}
+
+// ── Analyze ──────────────────────────────────────────────────────────────────
+analyzeBtn.addEventListener('click', async () => {
+  if (!selectedFile) return;
+
+  analyzeBtn.disabled = true;
+  analyzeBtn.innerHTML = '<span class="spinner"></span>Analyzing…';
+
+  const fd = new FormData();
+  fd.append('file', selectedFile);
+
+  try {
+    const res = await fetch('/predict', { method: 'POST', body: fd });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Server error'); }
+    const data = await res.json();
+    showResults(data);
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    analyzeBtn.disabled = false;
+    analyzeBtn.innerHTML = 'Analyze Aesthetics';
+  }
+});
+
+// ── Show results ─────────────────────────────────────────────────────────────
+function showResults(d) {
+  results.style.display = 'block';
+  results.style.animation = 'none';
+  void results.offsetWidth;
+  results.style.animation = '';
+
+  // Score
+  animateNumber('score-val', 0, d.score, 1200, v => v.toFixed(1));
+
+  // Arc gauge
+  setTimeout(() => {
+    const pct = (d.score - 1) / 9;
+    const arcLen = 251.2;
+    document.getElementById('arc-fill').style.strokeDashoffset = arcLen * (1 - pct);
+  }, 100);
+
+  // Label badge
+  const badge = document.getElementById('label-badge');
+  badge.className = 'label-badge ' + d.label;
+  document.getElementById('label-text').textContent = d.label;
+
+  // Confidence
+  animateNumber('conf-val', 0, d.confidence, 1000, v => v.toFixed(1) + '%');
+  setTimeout(() => {
+    document.getElementById('conf-fill').style.width = d.confidence + '%';
+  }, 200);
+
+  // Breakdown
+  renderBreakdown(d.breakdown);
+
+  // Feedback
+  document.getElementById('feedback-text').textContent = d.feedback;
+
+  results.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ── Radial breakdown ─────────────────────────────────────────────────────────
+const DIM_COLORS = {
+  brightness:   '#c8a96e',
+  contrast:     '#7c6ef0',
+  colorfulness: '#e05c8a',
+  sharpness:    '#5cb8e0',
+  overall:      '#5ce08a',
+};
+
+function renderBreakdown(bd) {
+  const grid = document.getElementById('breakdown-grid');
+  grid.innerHTML = '';
+
+  for (const [key, val] of Object.entries(bd)) {
+    const pct  = Math.round(val * 100);
+    const circ = 163;
+    const offs = circ * (1 - val);
+    const color= DIM_COLORS[key] || '#c8a96e';
+
+    grid.innerHTML += `
+      <div class="dim-item">
+        <div class="radial">
+          <svg viewBox="0 0 56 56" width="64" height="64">
+            <circle class="radial-track" cx="28" cy="28" r="26"/>
+            <circle class="radial-fill" cx="28" cy="28" r="26"
+              stroke="${color}"
+              style="stroke-dashoffset:${circ}"
+              data-offset="${offs}"/>
+          </svg>
+          <div class="radial-text" style="color:${color}">${pct}%</div>
+        </div>
+        <div class="dim-label">${key}</div>
+      </div>`;
+  }
+
+  // Animate fills after render
+  setTimeout(() => {
+    document.querySelectorAll('.radial-fill').forEach(el => {
+      el.style.strokeDashoffset = el.dataset.offset;
+    });
+  }, 150);
+}
+
+// ── Animate number ────────────────────────────────────────────────────────────
+function animateNumber(id, from, to, duration, fmt) {
+  const el = document.getElementById(id);
+  const start = performance.now();
+  function frame(now) {
+    const p = Math.min((now - start) / duration, 1);
+    const ease = 1 - Math.pow(1 - p, 4);
+    el.textContent = fmt(from + (to - from) * ease);
+    if (p < 1) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+// ── Error toast ───────────────────────────────────────────────────────────────
+function showError(msg) {
+  const t = document.getElementById('error-toast');
+  t.textContent = '⚠ ' + msg;
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 4000);
+}
+
+// ── Reset ────────────────────────────────────────────────────────────────────
+resetBtn.addEventListener('click', () => {
+  selectedFile = null;
+  fileInput.value = '';
+  previewImg.style.display = 'none';
+  previewImg.src = '';
+  uploadPrompt.style.display = 'block';
+  uploadZone.classList.remove('has-image');
+  analyzeBtn.disabled = true;
+  results.style.display = 'none';
+});
+</script>
+</body>
+</html>

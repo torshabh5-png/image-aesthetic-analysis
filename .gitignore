@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Dataset & images (too large for GitHub)
+resized_images/
+images_mirrored/
+*.jpg
+*.jpeg
+*.png
+
+# Model checkpoints (too large)
+checkpoints/
+
+# Generated CSVs
+ground_truth_dataset_mirrored.csv
+ground_truth_dataset_cleaned.csv
+image_label_pairs.csv
+ground_truth.csv
+
+# EDA & eval outputs
+eda_plots/
+eval_results/
+
+# Misc
+.DS_Store
+Thumbs.db
